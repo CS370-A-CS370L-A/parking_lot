@@ -1,0 +1,59 @@
+name: Grade Java Code
+
+on: [push]
+
+jobs:
+  grade:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Java 11
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+
+      - name: Install xmllint
+        run: sudo apt-get install -y libxml2-utils
+
+      - name: Run Maven tests
+        id: maven-test
+        run: mvn test -Dmaven.test.failure.ignore=true
+
+      - name: Generate Grade and Append Failing Tests
+        run: |
+          # Find test reports
+          REPORTS=$(ls target/surefire-reports/TEST-*.xml 2>/dev/null || true)
+
+          if [ -n "$REPORTS" ]; then
+            TOTAL_FAILURES=0
+            TOTAL_ERRORS=0
+            echo "=== Test Summary ===" > grade.txt
+
+            for REPORT in $REPORTS; do
+              FAILURES=$(xmllint --xpath 'string(//testsuite/@failures)' "$REPORT" 2>/dev/null || echo 0)
+              ERRORS=$(xmllint --xpath 'string(//testsuite/@errors)' "$REPORT" 2>/dev/null || echo 0)
+              TOTAL_FAILURES=$((TOTAL_FAILURES + FAILURES))
+              TOTAL_ERRORS=$((TOTAL_ERRORS + ERRORS))
+
+              if [ "$FAILURES" -ne 0 ] || [ "$ERRORS" -ne 0 ]; then
+                echo "Failing tests in $(basename "$REPORT"):" >> grade.txt
+                xmllint --xpath '//testcase[failure or error]/@name' "$REPORT" 2>/dev/null | sed 's/name="\([^"]*\)"/- \1/g' >> grade.txt
+                echo "" >> grade.txt
+              fi
+            done
+
+            if [ "$TOTAL_FAILURES" -eq 0 ] && [ "$TOTAL_ERRORS" -eq 0 ]; then
+              echo "Grade: 1 (All tests passed)" > grade.txt
+            else
+              echo "Grade: 0 ($TOTAL_FAILURES test(s) failed, $TOTAL_ERRORS error(s))" > grade.txt
+              cat grade.txt
+            fi
+          else
+            echo "Grade: 0 (Test report not found)" > grade.txt
+          fi
+
+      - name: Show Grade and Failing Tests
+        run: cat grade.txt
